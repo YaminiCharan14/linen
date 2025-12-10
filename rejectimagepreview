@@ -1,0 +1,36 @@
+import React, { useState, useEffect } from "react";
+import Lightbox from "yet-another-react-lightbox";
+import Zoom from "yet-another-react-lightbox/plugins/zoom";
+import "yet-another-react-lightbox/styles.css";
+
+export default function RejectImagePreviewDialog({
+  open,
+  images = [],
+  index = 0,
+  onClose,
+}) {
+  const [currentIndex, setCurrentIndex] = useState(index);
+
+
+  useEffect(() => {
+    if (open) {
+      setCurrentIndex(index);
+    }
+  }, [open, index]);
+
+  if (!images || images.length === 0) return null;
+
+  const slides = images.map((src) => ({ src }));
+
+  return (
+    <Lightbox
+      open={open}
+      close={onClose}
+      slides={slides}
+      index={currentIndex}
+      onIndexChange={setCurrentIndex}
+      plugins={[Zoom]}
+      animation={{ zoom: 300 }}
+    />
+  );
+}
