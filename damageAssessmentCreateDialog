@@ -1,0 +1,279 @@
+// src/components/damageAssessment/CreateDamageRequestDialog.jsx
+import React, { useEffect, useMemo, useState } from "react";
+import {
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Button,
+  TextField,
+  Box,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
+  Autocomplete,
+} from "@mui/material";
+import debounce from "lodash.debounce";
+import { subDays, startOfDay, endOfDay, format } from "date-fns";
+
+import UploadImages from "../orders/UploadImages";
+import { damageAssessmentService } from "../../services/damageAssessmentService";
+import { customerService } from "../../services/customerService";
+import { orderService } from "../../services/orderService";
+
+/* ================= CONSTANTS ================= */
+const SOURCE_TYPE = "ORDER";
+
+/* ================= DEFAULT FORM ================= */
+const EMPTY_FORM = {
+  customerId: "",
+  orderId: "",
+  productId: "",
+  quantity: "",
+  price: "",
+  notes: "",
+  images: [],
+};
+
+function CreateDamageRequestDialog({
+  open,
+  onClose,
+  onSave,
+  mode = "create",
+  initialData = null,
+}) {
+  const [form, setForm] = useState(EMPTY_FORM);
+
+  const [customerOptions, setCustomerOptions] = useState([]);
+  const [selectedCustomer, setSelectedCustomer] = useState(null);
+
+  const [orders, setOrders] = useState([]);
+  const [products, setProducts] = useState([]);
+
+  /* ================= DATE RANGE (IMPORTANT FIX) ================= */
+  const startDate = format(
+    startOfDay(subDays(new Date(), 30)),
+    "yyyy-MM-dd'T'HH:mm:ss"
+  );
+  const endDate = format(
+    endOfDay(new Date()),
+    "yyyy-MM-dd'T'HH:mm:ss"
+  );
+
+  /* ================= INIT ================= */
+  useEffect(() => {
+    if (!open) {
+      setForm(EMPTY_FORM);
+      setSelectedCustomer(null);
+      setOrders([]);
+      setProducts([]);
+      return;
+    }
+
+    if (mode === "edit" && initialData) {
+      setForm({
+        customerId: initialData.customerId,
+        orderId: initialData.sourceId,
+        productId: initialData.productId,
+        quantity: initialData.quantity,
+        price: initialData.price,
+        notes: initialData.notes,
+        images: initialData.images || [],
+      });
+    }
+  }, [open, mode, initialData]);
+
+  const handleChange = (field, value) => {
+    setForm((p) => ({ ...p, [field]: value }));
+  };
+
+  /* ================= CUSTOMER SEARCH ================= */
+  const fetchCustomers = async (query) => {
+    if (!query || query.length < 2) return;
+    const res = await customerService.searchCustomersByName(query);
+    setCustomerOptions(res || []);
+  };
+
+  const debouncedFetchCustomers = useMemo(
+    () => debounce(fetchCustomers, 300),
+    []
+  );
+
+  /* ================= FETCH ORDERS BY CUSTOMER (FIXED) ================= */
+  useEffect(() => {
+    if (!form.customerId) {
+      setOrders([]);
+      return;
+    }
+
+    const fetchOrders = async () => {
+      const filter = {
+        customerId: form.customerId,
+        startDate,
+        endDate,
+        status: null,
+        orderType: null,
+        branchId: null,
+      };
+
+      const res = await orderService.searchOrders(filter);
+      const list = Array.isArray(res) ? res : res?.content ?? [];
+      setOrders(list);
+    };
+
+    fetchOrders();
+  }, [form.customerId]);
+
+  /* ================= FETCH PRODUCTS BY ORDER ================= */
+  useEffect(() => {
+    if (!form.orderId) {
+      setProducts([]);
+      return;
+    }
+
+    const fetchProducts = async () => {
+      const order = await orderService.getOrderById(form.orderId);
+
+      const items =
+        order?.leasingOrderDetails?.deliveryItems ||
+        order?.leasingOrderDetails?.pickupItems ||
+        order?.rentalOrderDetails?.items ||
+        order?.washingOrderDetails?.items ||
+        [];
+
+      setProducts(items);
+    };
+
+    fetchProducts();
+  }, [form.orderId]);
+
+  /* ================= SUBMIT ================= */
+  const handleSubmit = async () => {
+    const payload = {
+      customerId: Number(form.customerId),
+      productId: Number(form.productId),
+      quantity: Number(form.quantity),
+      price: form.price ? Number(form.price) : null,
+      sourceType: SOURCE_TYPE,
+      sourceId: Number(form.orderId),
+      notes: form.notes || null,
+      images: form.images || [],
+    };
+
+    await damageAssessmentService.createDamageRequest(payload);
+    onSave();
+    onClose();
+  };
+
+  /* ================= UI ================= */
+  return (
+    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
+      <DialogTitle>Create Damage Request</DialogTitle>
+
+      <DialogContent>
+        <Box display="flex" flexDirection="column" gap={2} mt={1}>
+          {/* CUSTOMER */}
+          <Autocomplete
+            options={customerOptions}
+            getOptionLabel={(o) => o.name}
+            value={selectedCustomer}
+            onInputChange={(e, v) => debouncedFetchCustomers(v)}
+            onChange={(e, v) => {
+              setSelectedCustomer(v);
+              handleChange("customerId", v?.id || "");
+            }}
+            renderInput={(params) => (
+              <TextField {...params} label="Customer" />
+            )}
+          />
+
+          {/* ORDER */}
+          <FormControl fullWidth disabled={!orders.length}>
+            <InputLabel>Order</InputLabel>
+            <Select
+              label="Order"
+              value={form.orderId}
+              onChange={(e) =>
+                handleChange("orderId", e.target.value)
+              }
+            >
+              {orders.map((o) => (
+                <MenuItem key={o.id} value={o.id}>
+                  {o.referenceNumber} — {o.orderType}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+
+          {/* PRODUCT */}
+          <FormControl fullWidth disabled={!products.length}>
+            <InputLabel>Product</InputLabel>
+            <Select
+              label="Product"
+              value={form.productId}
+              onChange={(e) =>
+                handleChange("productId", e.target.value)
+              }
+            >
+              {products.map((p) => (
+                <MenuItem
+                  key={p.productId || p.id}
+                  value={p.productId || p.id}
+                >
+                  {p.productName || p.name}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+
+          <TextField
+            label="Quantity"
+            type="number"
+            value={form.quantity}
+            onChange={(e) =>
+              handleChange("quantity", e.target.value)
+            }
+          />
+
+          <TextField
+            label="Price"
+            type="number"
+            value={form.price}
+            onChange={(e) =>
+              handleChange("price", e.target.value)
+            }
+          />
+
+          <TextField
+            label="Notes"
+            multiline
+            rows={2}
+            value={form.notes}
+            onChange={(e) =>
+              handleChange("notes", e.target.value)
+            }
+          />
+
+          <UploadImages
+            images={form.images}
+            onChange={(imgs) => handleChange("images", imgs)}
+          />
+        </Box>
+      </DialogContent>
+
+      <DialogActions>
+        <Button onClick={onClose}>Cancel</Button>
+        <Button
+          variant="contained"
+          disabled={!form.quantity}
+          onClick={handleSubmit}
+        >
+          Create
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
+
+export default CreateDamageRequestDialog;
